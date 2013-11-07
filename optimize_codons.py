@@ -4,6 +4,10 @@ import amino_acids as aa
 import math
 import sys
 
+def aastr_for_integer( aaindex ) :
+    assert( aaindex >= 0 and aaindex < 21 )
+    return aa.amino_acids[aaindex] if aaindex != 20 else "STOP"    
+
 # A = 0, C = 1, G = 2, T = 3
 # codon = TCG --> 3*16 + 1*4 + 2 = 54
 class GeneticCodeMapper :
@@ -35,7 +39,7 @@ class LexicographicalIterator :
         self.search_space_size = self.dimprods[ 0 ] * self.dimsizes[ 0 ]
         self.pos = [0] * self.size
         self.at_end = False
-        
+
     def increment( self ) :
         i = self.size
         while i > 0 :
@@ -60,7 +64,7 @@ class LexicographicalIterator :
     def set_from_index( self, ind ) :
         ''' set the state of the lex given a previously computed index'''
         for i in xrange( self.size ):
-            self.pos[ i ] = ind / self.dimprods[i] 
+            self.pos[ i ] = ind / self.dimprods[i]
             ind = ind % self.dimprods[ i ]
 
 class GenericCodon :
@@ -70,6 +74,24 @@ class GenericCodon :
         self.which = [ [] ] * 3
         for i in xrange(3) : self.which[i] = []
         self.count_pos = [ 0 ] * 3
+        self.degenerate_base_names = {
+            (True, False,False,False) : "A",
+            (False,True, False,False) : "C",
+            (False,False,True, False) : "G",
+            (False,False,False,True ) : "T",
+            (True, False,False,True ) : "W",
+            (False,True, True, False) : "S",
+            (True, True, False,False) : "M",
+            (False,False,True, True ) : "K",
+            (True, False,True, False) : "P",
+            (False,True, False,True ) : "Y",
+            (False,True, True, True ) : "B",
+            (True, False,True, True ) : "D",
+            (True, True, False,True ) : "H",
+            (True, True, True, False) : "V",
+            (True, True, True, True ) : "N" }
+        
+
     def set_pos( self, codon_pos, base ) :
         assert( codon_pos < 3 and codon_pos >= 0 )
         assert( base < 4 and base >= 0 )
@@ -111,7 +133,7 @@ class GenericCodon :
                 posi = posi % sigdig
                 sigdig /= 2
         return True
-            
+
 
 class AALibrary :
     def __init__( self ) :
@@ -139,7 +161,7 @@ class AALibrary :
         self.n_positions = len(row1)-1
         self.aa_counts = [ [] ]*(self.n_positions)
         for i in xrange(self.n_positions) : self.aa_counts[ i ] = [0] * 20
-        self.orig_pos = row1[1:]
+        self.orig_pos = [ x.strip() for x in row1[1:] ]
         self.max_obs = 0
         for i in xrange(20) :
             line = lines[ i + 1 ]
@@ -177,7 +199,16 @@ class AALibrary :
                         self.divmin_for_error[i][ error ] = ( log_diversity, self.gclex.index() )
                 self.gclex.increment()
 
-    def optimize_library( self ) :
+                
+    def optimize_library( self, diversity_cap ) :
+        '''
+        Run a dynamic programming algorithm to determine the minimum diversity for
+        every error level, and return an array of error levels for each position
+        that describes the library that fits under the diversity cap with the smallest
+        error.  This array can be used with the previously-computed divmin_for_error
+        array to figure out which codons should be used at every position.
+        '''
+
         assert( hasattr( self, 'divmin_for_error' ) )
         self.dp_divmin_for_error = [[]] * self.n_positions
 
@@ -185,10 +216,10 @@ class AALibrary :
         #  pos0 = which error level ( from self.divmin_for_error ) for this position
         #  pos1 = which error total ( from self.dp_divmin_for_error ) for the previous position
         self.dp_traceback = [[]] * self.n_positions
-        error_span = self.max_obs * self.n_positions
+        self.error_span = self.max_obs * self.n_positions
         for i in xrange( self.n_positions ) :
-            self.dp_divmin_for_error[i] = [ self.infinity ] * error_span
-            self.dp_traceback[i] = [ ( self.infinity, self.infinity ) ] * error_span 
+            self.dp_divmin_for_error[i] = [ self.infinity ] * self.error_span
+            self.dp_traceback[i] = [ ( self.infinity, self.infinity ) ] * self.error_span
 
         # take care of position 0: copy self.divmin_for_error[0] into self.dp_divmin_for_eror
         for i in xrange( self.max_obs ) :
@@ -197,7 +228,7 @@ class AALibrary :
 
         for i in xrange( 1, self.n_positions )  :
             # solve the dynamic programming problem for residues 0..i
-            for j in xrange( error_span ) :
+            for j in xrange( self.error_span ) :
                 j_divmin = self.infinity
                 j_traceback = None
                 for k in xrange( min( j, self.max_obs ) ) :
@@ -210,15 +241,78 @@ class AALibrary :
                 if j_divmin != self.infinity :
                     self.dp_divmin_for_error[i][j] = j_divmin
                     self.dp_traceback[i][j] = j_traceback
-                    
+        return self.traceback()
 
-if __name__ == "__main__" :
-    with blargs.Parser( locals() ) as p :
-        p.str( "input_csv" ).required()
-        p.float( "diversity_cap" ).required()
+    def traceback( self ) :
+        # now the traceback
+        optimal_error_traceback = [ 0 ] * self.n_positions
+        log_diversity_cap =  math.log( diversity_cap )
 
-    library = AALibrary()
-    library.load_library( input_csv )
+        #for i in xrange( self.error_span ) :
+        #    if self.dp_divmin_for_error[-1][i] != self.infinity :
+        #        print "Error of",i,"requires diversity of %5.3f" % self.dp_divmin_for_error[-1][i]
+
+        for i in xrange( self.error_span ) :
+            if self.dp_divmin_for_error[-1][i] != self.infinity and self.dp_divmin_for_error[-1][i] < log_diversity_cap :
+                best = i
+                print "Minimum error of", i, "with log(diversity) of",self.dp_divmin_for_error[-1][i]
+                break
+        return self.traceback_from_error_level( best, optimal_error_traceback )
+
+    def traceback_from_error_level( self, error_level, error_traceback ) :
+        position_error = [0] * self.n_positions
+        for i in xrange( self.n_positions - 1, -1, -1 ) :
+            tb = self.dp_traceback[ i ][ error_level ];
+            error_traceback[ i ] = tb[0]
+            error_level = tb[1]
+            position_error[i] = tb[0]
+        for i in xrange( self.n_positions ) :
+            print "Traceback position", i, "minimum error=", position_error[i]
+
+        return error_traceback
+
+def final_codon_string( position, generic_codon, library ) :
+    # three things we need:
+    # 1: the codon
+    # 2: the amino acids that are represented
+    # 2b: the counts from the original set of observations for each of the represented aas
+    # 3: the amino acids and their counts in the original set of observations that are not represented
+    aas_present  = library.aas_for_generic_codon( generic_codon )
+    orig_obs = library.aa_counts[ position ]
+
+    orig_pos_string = "Position %4s" % library.orig_pos[ position ]
+
+    codon_string = ""
+    for i in xrange(3) :
+        igcpos = generic_codon.pos[i]
+        base_tuple = ( igcpos[0], igcpos[1], igcpos[2], igcpos[3] )
+        codon_string += generic_codon.degenerate_base_names[ base_tuple ]
+     
+    present_string = ""
+    for i in xrange(len(aas_present)) :
+        if aas_present[i] :
+            present_string += " " + aastr_for_integer( i )
+            if i != 20 : present_string += "(" + str(orig_obs[i]) + ")"
+    absent_string = "Absent"
+    for i in xrange(len(orig_obs)) :
+        if orig_obs[i] != 0 and not aas_present[i]:
+            absent_string += " " + aastr_for_integer( i ) + "(" + str(orig_obs[i]) + ")"
+    log_diversity_string = "log(diversity)= %5.3f" % ( generic_codon.log_diversity() )
+
+    return orig_pos_string + " : " + codon_string + " : " + log_diversity_string + " : " + present_string + " : " + absent_string
+    
+def print_output_codons( library, error_sequence ) :
+    gc = GenericCodon()
+    diversity_sum = 0
+    for i in xrange(library.n_positions) :
+        lexind = library.divmin_for_error[ i ][ error_sequence[ i ] ][ 1 ]
+        library.gclex.set_from_index(lexind)
+        gc.set_from_lex( library.gclex )
+        diversity_sum += gc.log_diversity()
+        print final_codon_string( i, gc, library )
+    print "Max log diversity: ", math.log( diversity_cap ), "Theorical diversity", diversity_sum
+
+def practice_code( library ) :
     print library.max_obs
     print library.aa_counts
 
@@ -230,7 +324,7 @@ if __name__ == "__main__" :
 
     print "bigger lex"
     dims = [ 4, 3, 5 ]
-    lex = LexicographicalIterator( dims ) 
+    lex = LexicographicalIterator( dims )
     print lex.pos, lex.dimprods, lex.search_space_size
     for i in xrange(50) : lex.increment()
     print lex.pos
@@ -245,30 +339,35 @@ if __name__ == "__main__" :
     aas_ttg = library.aas_for_generic_codon( ttg_generic )
     for i in xrange( 21 ) :
         if aas_ttg[i] :
-            print aa.amino_acids[i] if i != 20 else "STOP"
+            print aastr_for_integer( i )
 
     ttg_generic.set_pos(0,1)
     aas_ttg = library.aas_for_generic_codon( ttg_generic )
     for i in xrange( 21 ) :
         if aas_ttg[i] :
-            print aa.amino_acids[i] if i != 20 else "STOP"
+            print aastr_for_integer( i )
 
     #ttg_generic[1][0] = True; # now try C/T A/T G
     ttg_generic.set_pos(1,0)
     aas_ttg = library.aas_for_generic_codon( ttg_generic )
     for i in xrange( 21 ) :
         if aas_ttg[i] :
-            print aa.amino_acids[i] if i != 20 else "STOP"
+            print aastr_for_integer( i )
 
+
+if __name__ == "__main__" :
+    with blargs.Parser( locals() ) as p :
+        p.str( "input_csv" ).required()
+        p.float( "diversity_cap" ).required()
+
+    print "Loading library"
+    library = AALibrary()
+    library.load_library( input_csv )
+
+    print "Computing minimum diversity for each error level for each position"
     library.compute_smallest_diversity_for_all_errors()
-    index = library.divmin_for_error[ 0 ][ 0 ][ 1 ]
-    library.gclex.set_from_index( index )
 
-    gc = GenericCodon()
-    gc.set_from_lex( library.gclex )
-    print gc.pos
+    print "Running dynamic programming to minimize error while coming under the diversity cap"
+    optimal = library.optimize_library( diversity_cap )
 
-
-    library.optimize_library()
-    print library.dp_divmin_for_error[-1]
-        
+    print_output_codons( library, optimal )
