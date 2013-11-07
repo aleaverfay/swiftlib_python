@@ -67,7 +67,7 @@ class LexicographicalIterator :
             self.pos[ i ] = ind / self.dimprods[i]
             ind = ind % self.dimprods[ i ]
 
-class GenericCodon :
+class DegenerateCodon :
     def __init__( self ) :
         self.pos = [ [] ] * 3
         for i in xrange(3) : self.pos[i] = [ False ] * 4
@@ -117,7 +117,7 @@ class GenericCodon :
         return codon_index
     def set_from_lex( self, lex ) :
         """
-        Set the state for this generic codon using a lex that's iterating over all 2**4**3 = 4096 codon options.
+        Set the state for this degenerate codon using a lex that's iterating over all 2**4**3 = 4096 codon options.
         Returns False if this is not a reasonable assignment; i.e. not all codon positions contain at least one base.
         """
         for i in xrange(3) :
@@ -140,11 +140,11 @@ class AALibrary :
         self.infinity = -1.0;
         self.gcmapper = GeneticCodeMapper()
 
-    def aas_for_generic_codon( self, generic_codon ) :
+    def aas_for_degenerate_codon( self, degenerate_codon ) :
         aas = [ False ] * 21 # 21 because the stop codon counts as a codon.
-        lex = LexicographicalIterator( generic_codon.count_pos )
+        lex = LexicographicalIterator( degenerate_codon.count_pos )
         while not lex.at_end :
-            codon_index = generic_codon.index_from_lex( lex )
+            codon_index = degenerate_codon.index_from_lex( lex )
             aas[ self.gcmapper.mapper[ codon_index ] ] = True
             lex.increment()
         return aas
@@ -184,17 +184,17 @@ class AALibrary :
         for i in xrange( self.n_positions ) : self.divmin_for_error[i] = [ ( self.infinity, 0 ) ] * self.max_obs
         dims = [ 2**4 ] * 3 # i.e. [ 16 ] * 3
         self.gclex = LexicographicalIterator( dims )
-        gc = GenericCodon()
+        gc = DegenerateCodon()
         for i in xrange( self.n_positions ) :
             self.gclex.reset()
             while not self.gclex.at_end :
                 if gc.set_from_lex( self.gclex ) :
-                    aas = self.aas_for_generic_codon( gc )
+                    aas = self.aas_for_degenerate_codon( gc )
                     error = self.error_given_aas_for_pos( i, aas )
                     log_diversity = gc.log_diversity()
                     prev_diversity = self.divmin_for_error[ i ][ error ][0]
                     if prev_diversity == self.infinity or log_diversity < prev_diversity :
-                        # store the diversity and information on the generic codon that
+                        # store the diversity and information on the degenerate codon that
                         # produced this level of error
                         self.divmin_for_error[i][ error ] = ( log_diversity, self.gclex.index() )
                 self.gclex.increment()
@@ -271,22 +271,22 @@ class AALibrary :
 
         return error_traceback
 
-def final_codon_string( position, generic_codon, library ) :
+def final_codon_string( position, degenerate_codon, library ) :
     # three things we need:
     # 1: the codon
     # 2: the amino acids that are represented
     # 2b: the counts from the original set of observations for each of the represented aas
     # 3: the amino acids and their counts in the original set of observations that are not represented
-    aas_present  = library.aas_for_generic_codon( generic_codon )
+    aas_present  = library.aas_for_degenerate_codon( degenerate_codon )
     orig_obs = library.aa_counts[ position ]
 
     orig_pos_string = "Position %4s" % library.orig_pos[ position ]
 
     codon_string = ""
     for i in xrange(3) :
-        igcpos = generic_codon.pos[i]
+        igcpos = degenerate_codon.pos[i]
         base_tuple = ( igcpos[0], igcpos[1], igcpos[2], igcpos[3] )
-        codon_string += generic_codon.degenerate_base_names[ base_tuple ]
+        codon_string += degenerate_codon.degenerate_base_names[ base_tuple ]
      
     present_string = ""
     for i in xrange(len(aas_present)) :
@@ -297,12 +297,12 @@ def final_codon_string( position, generic_codon, library ) :
     for i in xrange(len(orig_obs)) :
         if orig_obs[i] != 0 and not aas_present[i]:
             absent_string += " " + aastr_for_integer( i ) + "(" + str(orig_obs[i]) + ")"
-    log_diversity_string = "log(diversity)= %5.3f" % ( generic_codon.log_diversity() )
+    log_diversity_string = "log(diversity)= %5.3f" % ( degenerate_codon.log_diversity() )
 
     return orig_pos_string + " : " + codon_string + " : " + log_diversity_string + " : " + present_string + " : " + absent_string
     
 def print_output_codons( library, error_sequence ) :
-    gc = GenericCodon()
+    gc = DegenerateCodon()
     diversity_sum = 0
     for i in xrange(library.n_positions) :
         lexind = library.divmin_for_error[ i ][ error_sequence[ i ] ][ 1 ]
@@ -334,22 +334,22 @@ def practice_code( library ) :
     lex.set_from_index( index )
     print lex.pos
 
-    ttg_generic = GenericCodon()
-    ttg_generic.set_pos(0,3); ttg_generic.set_pos(1,3); ttg_generic.set_pos(2,2);
-    aas_ttg = library.aas_for_generic_codon( ttg_generic )
+    ttg_degenerate = DegenerateCodon()
+    ttg_degenerate.set_pos(0,3); ttg_degenerate.set_pos(1,3); ttg_degenerate.set_pos(2,2);
+    aas_ttg = library.aas_for_degenerate_codon( ttg_degenerate )
     for i in xrange( 21 ) :
         if aas_ttg[i] :
             print aastr_for_integer( i )
 
-    ttg_generic.set_pos(0,1)
-    aas_ttg = library.aas_for_generic_codon( ttg_generic )
+    ttg_degenerate.set_pos(0,1)
+    aas_ttg = library.aas_for_degenerate_codon( ttg_degenerate )
     for i in xrange( 21 ) :
         if aas_ttg[i] :
             print aastr_for_integer( i )
 
-    #ttg_generic[1][0] = True; # now try C/T A/T G
-    ttg_generic.set_pos(1,0)
-    aas_ttg = library.aas_for_generic_codon( ttg_generic )
+    #ttg_degenerate[1][0] = True; # now try C/T A/T G
+    ttg_degenerate.set_pos(1,0)
+    aas_ttg = library.aas_for_degenerate_codon( ttg_degenerate )
     for i in xrange( 21 ) :
         if aas_ttg[i] :
             print aastr_for_integer( i )
