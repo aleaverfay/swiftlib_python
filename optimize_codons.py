@@ -183,21 +183,21 @@ class AALibrary :
         self.divmin_for_error = [ [] ] * self.n_positions
         for i in xrange( self.n_positions ) : self.divmin_for_error[i] = [ ( self.infinity, 0 ) ] * self.max_obs
         dims = [ 2**4 ] * 3 # i.e. [ 16 ] * 3
-        self.gclex = LexicographicalIterator( dims )
-        gc = DegenerateCodon()
+        self.dclex = LexicographicalIterator( dims )
+        dc = DegenerateCodon()
         for i in xrange( self.n_positions ) :
-            self.gclex.reset()
-            while not self.gclex.at_end :
-                if gc.set_from_lex( self.gclex ) :
-                    aas = self.aas_for_degenerate_codon( gc )
+            self.dclex.reset()
+            while not self.dclex.at_end :
+                if dc.set_from_lex( self.dclex ) :
+                    aas = self.aas_for_degenerate_codon( dc )
                     error = self.error_given_aas_for_pos( i, aas )
-                    log_diversity = gc.log_diversity()
+                    log_diversity = dc.log_diversity()
                     prev_diversity = self.divmin_for_error[ i ][ error ][0]
                     if prev_diversity == self.infinity or log_diversity < prev_diversity :
                         # store the diversity and information on the degenerate codon that
                         # produced this level of error
-                        self.divmin_for_error[i][ error ] = ( log_diversity, self.gclex.index() )
-                self.gclex.increment()
+                        self.divmin_for_error[i][ error ] = ( log_diversity, self.dclex.index() )
+                self.dclex.increment()
 
                 
     def optimize_library( self, diversity_cap ) :
@@ -284,8 +284,8 @@ def final_codon_string( position, degenerate_codon, library ) :
 
     codon_string = ""
     for i in xrange(3) :
-        igcpos = degenerate_codon.pos[i]
-        base_tuple = ( igcpos[0], igcpos[1], igcpos[2], igcpos[3] )
+        idcpos = degenerate_codon.pos[i]
+        base_tuple = ( idcpos[0], idcpos[1], idcpos[2], idcpos[3] )
         codon_string += degenerate_codon.degenerate_base_names[ base_tuple ]
      
     present_string = ""
@@ -302,14 +302,14 @@ def final_codon_string( position, degenerate_codon, library ) :
     return orig_pos_string + " : " + codon_string + " : " + log_diversity_string + " : " + present_string + " : " + absent_string
     
 def print_output_codons( library, error_sequence ) :
-    gc = DegenerateCodon()
+    dc = DegenerateCodon()
     diversity_sum = 0
     for i in xrange(library.n_positions) :
         lexind = library.divmin_for_error[ i ][ error_sequence[ i ] ][ 1 ]
-        library.gclex.set_from_index(lexind)
-        gc.set_from_lex( library.gclex )
-        diversity_sum += gc.log_diversity()
-        print final_codon_string( i, gc, library )
+        library.dclex.set_from_index(lexind)
+        dc.set_from_lex( library.dclex )
+        diversity_sum += dc.log_diversity()
+        print final_codon_string( i, dc, library )
     print "Max log diversity: ", math.log( diversity_cap ), "Theorical diversity", diversity_sum
 
 def practice_code( library ) :
