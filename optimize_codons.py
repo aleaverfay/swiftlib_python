@@ -6,7 +6,7 @@ import sys
 
 def aastr_for_integer( aaindex ) :
     assert( aaindex >= 0 and aaindex < 21 )
-    return aa.amino_acids[aaindex] if aaindex != 20 else "STOP"    
+    return aa.amino_acids[aaindex] if aaindex != 20 else "STOP"
 
 # A = 0, C = 1, G = 2, T = 3
 # codon = TCG --> 3*16 + 1*4 + 2 = 54
@@ -52,9 +52,46 @@ class LexicographicalIterator :
         self.at_end = True
         return False
 
+    def upper_diagonal_increment( self ) :
+        for i in xrange( self.size - 1, -1, -1 ) :
+            self.pos[ i ] += 1
+            if ( self.pos[ i ] == self.dimsizes[ i ]  ) :
+                self.pos[ i ] = 0
+            else :
+                beyond_end = False
+                for k in xrange(i+1,self.size) :
+                    self.pos[ k ] = self.pos[ i ] + k - i
+                    if self.pos[k] >= self.dimsizes[k] :
+                        beyond_end = true
+                        break
+                if beyond_end and i == 0 :
+                    for k in xrange( self.size ) :
+                        self.pos[ k ] = 0
+                    self.at_end = True
+                    return False
+                elif not beyond_end :
+                    return True
+        self.at_end = True
+        return False
+
+
     def reset( self ) :
         for i in xrange( self.size ) : self.pos[ i ] = 0
         self.at_end = False
+
+    def upper_diagonal_reset( self ) :
+        beyond_end = False
+        for i in xrange( self.size ) :
+            self.pos[ i ] = i
+            if i >= self.dimsizes[i] :
+                beyond_end = True
+        if beyond_end :
+            for i in xrange( self.size ) :
+                self.pos[ i ] = 0
+            self.at_end = True
+        else :
+            self.at_end = False
+
     def index( self ) :
         ''' return the integer index representing the state of the lex'''
         ind = 0
@@ -83,14 +120,22 @@ class DegenerateCodon :
             (False,True, True, False) : "S",
             (True, True, False,False) : "M",
             (False,False,True, True ) : "K",
-            (True, False,True, False) : "P",
+            (True, False,True, False) : "R",
             (False,True, False,True ) : "Y",
             (False,True, True, True ) : "B",
             (True, False,True, True ) : "D",
             (True, True, False,True ) : "H",
             (True, True, True, False) : "V",
             (True, True, True, True ) : "N" }
-        
+        self.names_to_bases = {}
+        for bases in self.degenerate_base_names :
+            self.names_to_bases[ self.degenerate_base_names[ bases] ] = bases;
+
+    def codon_string( self ) :
+        output_codon_string = ""
+        for i in xrange(3) :
+            output_codon_string += self.degenerate_base_names[ ( self.pos[i][0], self.pos[i][1], self.pos[i][2], self.pos[i][3] ) ]
+        return output_codon_string
 
     def set_pos( self, codon_pos, base ) :
         assert( codon_pos < 3 and codon_pos >= 0 )
@@ -104,6 +149,14 @@ class DegenerateCodon :
             self.which[i][:] = []
             self.count_pos[i] = 0
             for j in xrange(4) : self.pos[i][j] = False
+    def diversity( self ) :
+        for i in xrange(3) :
+            if self.count_pos[i] == 0 :
+                return this.infinity
+        div =  1
+        for i in xrange(3) :
+            div *= self.count_pos[i]
+        return div
     def log_diversity( self ) :
         for i in xrange(3) : assert( self.count_pos[i] != 0 )
         ld = 0.0
@@ -117,15 +170,12 @@ class DegenerateCodon :
         return codon_index
     def set_from_lex( self, lex ) :
         """
-        Set the state for this degenerate codon using a lex that's iterating over all 2**4**3 = 4096 codon options.
+        Set the state for this degenerate codon using a lex that's iterating over all (2**4-1)**3 = 3375 codon options.
         Returns False if this is not a reasonable assignment; i.e. not all codon positions contain at least one base.
         """
-        for i in xrange(3) :
-            if lex.pos[i] == 0 : return False
-
         self.reset()
         for i in xrange(3) :
-            posi = lex.pos[i]
+            posi = lex.pos[i]+1 # take "14" to mean "all degererate nucleotides" and "0" to mean "only A"
             sigdig = 8
             for j in xrange(4) :
                 if posi / sigdig != 0 :
@@ -139,6 +189,10 @@ class AALibrary :
     def __init__( self ) :
         self.infinity = -1.0;
         self.gcmapper = GeneticCodeMapper()
+        self.max_dcs_per_pos = 1
+        self.max_oligos_per_stretch = 0
+        self.max_oligos_total = 0
+        self.n_stretches = 0
 
     def aas_for_degenerate_codon( self, degenerate_codon ) :
         aas = [ False ] * 21 # 21 because the stop codon counts as a codon.
@@ -149,57 +203,251 @@ class AALibrary :
             lex.increment()
         return aas
 
-    #format should be a table with N columns and 21 rows
+    def enumerate_aas_for_all_degenerate_codons( self ) :
+        if ( hasattr( self, "aas_for_dc") ) :
+            return;
+        dims = [ 15, 15, 15 ];
+        self.aas_for_dc = [];
+        self.diversities_for_dc = []
+        self.dclex = LexicographicalIterator( dims )
+        dc = DegenerateCodon();
+        self.dclex.reset()
+        while not self.dclex.at_end :
+            dc.set_from_lex( self.dclex );
+            self.aas_for_dc.append( self.aas_for_degenerate_codon( dc ) )
+            self.diversities_for_dc.append( dc.diversity() )
+            self.dclex.increment()
+
+
+    #format should be a table with N columns and 23 rows
     # row 1 is a header, which just gives the sequence positions
+    # row 2 defines stretch boundaries
+    # row 3 gives the maximum number of DCs for each position
     # column 1 gives the amino acid names
     # row1/column1 gives nothing
     # all other row/column combinations should be integers
     def load_library( self, libname ) :
         lines = open( libname ).readlines()
-        assert( len(lines) == 21 )
+        assert( len(lines) == 23 )
         row1 = lines[0].split(",")
         self.n_positions = len(row1)-1
-        self.aa_counts = [ [] ]*(self.n_positions)
-        for i in xrange(self.n_positions) : self.aa_counts[ i ] = [0] * 20
+        self.aa_counts = [ [] ] * self.n_positions
+        self.required  = [ [] ] * self.n_positions
+        self.forbidden = [ [] ] * self.n_positions
+        self.stretch_reps = self.n_positions * [ 0 ]
+        self.max_dcs_for_pos = self.n_positions * [ 1 ]
+        for i in xrange(self.n_positions) :
+            self.aa_counts[ i ] = [ 0     ] * 21
+            self.required[ i ]  = [ False ] * 21
+            self.forbidden[ i ] = [ False ] * 21
         self.orig_pos = [ x.strip() for x in row1[1:] ]
-        self.max_obs = 0
+
+        # read out the stretch-boundary data from the CSV input, marking stretch
+        # representatives for each position (the first position in a stretch
+        # being its own representative) and counting the number of stretches
+        row2 = lines[1]
+        row2cols = row2.split(",")[1:]
+        last_rep = 0
+
+        # the first position is always considered to be the start of a stretch
+        self.n_stretches = 1
+        self.stretch_reps[0] = 0
+        for i in xrange(1,self.n_positions) :
+            if row2cols[i] == "|" :
+                last_rep = i
+                self.n_stretches += 1
+            self.stretch_reps[i] = last_rep
+
+        # increase the maximum number of oligos total if it is less than the
+        # total number of stretches, othrwise, there wouldn't be enough oligos
+        # to cover all the stretches and the optimization would be nonsensical
+        if self.max_oligos_total < self.n_stretches :
+            self.max_oligos_total = self.n_stretches
+
+        # read out the per-position counts of the number of degenerate codons
+        # allowed at each position from the CSV input text
+        row3 = lines[2]
+        row3cols = row3.split(",")[1:]
+        self.max_dcs_per_pos = 1
+        for i in xrange( self.n_positions ) :
+            self.max_dcs_for_pos[ i ] = int( row3cols[i] )
+            if self.max_dcs_for_pos[i] > self.max_dcs_per_pos :
+                self.max_dcs_per_pos = self.max_dcs_for_pos[i]
+
+        # increase the maximum number of oligos per stretch to give space for
+        # at least one position in a stretch to have as many degenerate codons
+        # as has been allowed at that position, otherwise, there is no point in
+        # entertaining that many degenerate codons at all
+        if self.max_oligos_per_stretch == 0 :
+            self.max_oligos_per_stretch = self.max_oligos_total - self.n_stretches + 1
+        elif self.max_oligos_per_stretch < self.max_dcs_per_pos :
+            self.max_oligos_per_stretch = self.max_dcs_per_pos
+
+        # increase the maximum number of oligos total to give space for the maximum number
+        # of oligos in a single stretch - 1 + the total number of stretches
+        # otherwise, there is no point in looking at multiple degenerate codons at a single
+        # position or multiple oligos to cover a single stretch
+        if self.max_oligos_total < self.n_stretches + self.max_oligos_per_stretch - 1 :
+            self.max_oligos_total = self.n_stretches + self.max_oligos_per_stretch - 1
+
+        self.max_per_position_error = 0
         for i in xrange(20) :
-            line = lines[ i + 1 ]
+            line = lines[ i + 3 ]
             vals = line.split(",")[1:]
             iiobs = 0
             for j in xrange(len(vals)):
                 self.aa_counts[j][i] = int(vals[j])
                 iiobs += self.aa_counts[j][i]
-            if iiobs > self.max_obs :
-                self.max_obs = iiobs
+            if iiobs > self.max_per_position_error :
+                self.max_per_position_error = iiobs
     def error_given_aas_for_pos( self, pos, aas ) :
         error = 0
         for i in xrange(20) :
+            icount = self.aa_counts[ pos ][ i ]
             if not aas[ i ] :
-                error += self.aa_counts[ pos ][ i ]
+                if self.required[ pos ][ i ] :
+                    return self.infinity
+                else :
+                    error += icount
+            else :
+                if self.forbidden[ pos ][ i ] :
+                    return self.infinity
+                if icount < 0 :
+                    error -= icount
         return error
 
-    def compute_smallest_diversity_for_all_errors( self ) :
-        self.divmin_for_error = [ [] ] * self.n_positions
-        for i in xrange( self.n_positions ) : self.divmin_for_error[i] = [ ( self.infinity, 0 ) ] * self.max_obs
-        dims = [ 2**4 ] * 3 # i.e. [ 16 ] * 3
-        self.dclex = LexicographicalIterator( dims )
-        dc = DegenerateCodon()
-        for i in xrange( self.n_positions ) :
-            self.dclex.reset()
-            while not self.dclex.at_end :
-                if dc.set_from_lex( self.dclex ) :
-                    aas = self.aas_for_degenerate_codon( dc )
-                    error = self.error_given_aas_for_pos( i, aas )
-                    log_diversity = dc.log_diversity()
-                    prev_diversity = self.divmin_for_error[ i ][ error ][0]
-                    if prev_diversity == self.infinity or log_diversity < prev_diversity :
-                        # store the diversity and information on the degenerate codon that
-                        # produced this level of error
-                        self.divmin_for_error[i][ error ] = ( log_diversity, self.dclex.index() )
-                self.dclex.increment()
+    def error_given_aas_for_pos_ignore_req( self, pos, aas ) :
+        error = 0
+        for i in xrange(20) :
+            icount = self.aa_counts[ pos ][ i ]
+            if not aas[ i ] :
+                if icount > 0 :
+                    error += icount
+            else :
+                if self.forbidden[ pos ][ i ] :
+                    return self.infinity
+                if icount < 0 :
+                    error -= icount
+        return error
 
-                
+    def useful_aaind_for_pos( self, aas, pos ) :
+        aaind = 0
+        for i in xrange(21) :
+            iuseful = self.aa_counts[pos][i] != 0 or self.required[pos][i];
+            aaind = 2*aaind + ( 1 if aas[i] and iuseful else 0 )
+        return aaind
+
+    def find_useful_codons( self ) :
+        self.useful_codons = []
+
+        # the diversities for the degenerate codons; this is a three-dimensional array
+        # index 0: which position
+        # index 1: what error
+        # index 2: either 0 (for the codon's diveristy) or 1 (for the codon's index)
+
+        div_for_codons = []
+        for i in xrange( self.n_positions ) :
+            self.useful_codons.append( [] )
+            div_for_codons.append( {} )
+        for i in xrange( 3375 ) :
+            iaas = self.aas_for_dc[ i ]
+            idiv = self.diversities_for_dc[ i ]
+            for j in xrange( self.n_positions ) :
+                ijerror = self.error_given_aas_for_pos_ignore_req( j, iaas )
+                if ( ijerror == self.infinity ) : continue;
+                ij_aaind = self.useful_aaind_for_pos( iaas, j )
+
+                # keep this codon if it's the first codon producing ijerror
+                # OR it's the first codon with the given aa index producing ijerror
+                # OR the diversity for this codon is smaller than the smallest-seen
+                # diversity of any codon producing ijerror with the given aa index.
+                if ( ijerror not in div_for_codons[j] or
+                     ij_aaind not in div_for_codons[j][ ijerror ] or
+                     div_for_codons[j][ ijerror][ ij_aaind ][ 0 ] > idiv ) :
+                    if ( ijerror not in div_for_codons[j] )  :
+                        div_for_codons[j][ ijerror ] = {}
+                    div_for_codons[j][ ijerror ][ ij_aaind ] = [ idiv, i ]; # JS->Py note: could be a tuple?
+        for i in xrange( self.n_positions ) :
+            for j in div_for_codons[ i ] :
+                if ( j not in div_for_codons[i] ) : continue # JS->PY note: maybe unnecessary?
+                jaainds = div_for_codons[i][j]
+                for k in jaainds :
+                    self.useful_codons[i].append( jaainds[k][1] )
+
+
+    def codon_inds_from_useful_codon_lex( self, position, useful_codon_lex ) :
+        inds = []
+        for i in xrange( len( useful_codon_lex.pos ) ) :
+            inds.append( self.useful_codons[ position ][ useful_codon_lex.pos[i] ] )
+        return inds
+
+    def compute_smallest_diversity_for_all_errors( self ) :
+
+        self.enumerate_aas_for_all_degenerate_codons();
+        self.find_useful_codons();
+
+        self.divmin_for_error_for_n_dcs = [ [] ] * self.n_positions
+        self.codons_for_error_for_n_dcs = [ [] ] * self.n_positions
+        self.errors_for_n_dcs_for_position = [ [] ] * self.n_positions
+        for i in xrange(self.n_positions) :
+            #print "compute_smallest_diversity_for_all_errors", i, len( self.divmin_for_error_for_n_dcs ), len( self.max_dcs_for_pos )
+            self.divmin_for_error_for_n_dcs[i] =    ( self.max_dcs_for_pos[i]+1 ) * [ [] ]
+            self.codons_for_error_for_n_dcs[i] =    ( self.max_dcs_for_pos[i]+1 ) * [ [] ]
+            self.errors_for_n_dcs_for_position[i] = ( self.max_dcs_for_pos[i]+1 ) * [ [] ]
+            for j in xrange(1, self.max_dcs_for_pos[i]+1) :
+                self.divmin_for_error_for_n_dcs[i][j] = ( self.max_per_position_error+1 ) * [ self.infinity ]
+                self.codons_for_error_for_n_dcs[i][j] = ( self.max_per_position_error+1 ) * [ self.infinity ]
+                self.errors_for_n_dcs_for_position[i][j] = []
+        aas_for_combo = 21 * [ False ]
+        for i in xrange( self.n_positions ) :
+            for j in xrange(1,self.max_dcs_for_pos[i]) :
+                dims = j*[ 0 ]
+                for k in xrange(j) :
+                    dims[k] = len( self.useful_codons[i] )
+                jlex = LexicographicalIterator( dims )
+                jlex.upper_diagonal_reset()
+
+                while not jlex.at_end :
+                    for k in xrange(21) : aas_for_combo[k] = False
+                    diversity = 0
+                    for k in xrange(j) :
+                        kcodon = self.useful_codons[i][ jlex.pos[k] ]
+                        diversity += self.diversities_for_dc[kcodon]
+                        kaas = self.aas_for_dc[ kcodon ]
+                        for l in xrange(21) :
+                            aas_for_combo[l] = aas_for_combo[l] or kaas[l]
+                    log_diversity = math.log( diversity )
+                    error = self.error_given_aas_for_pos( i, aas_for_combo )
+                    if ( error != self.infinity ) :
+                        prev_diversity = self.divmin_for_error_for_n_dcs[i][j][error]
+                        if ( prev_diversity == self.infinity ) :
+                            self.errors_for_n_dcs_for_position[i][j].append( error )
+                        if ( prev_diversity == self.infinity or prev_diversity > log_diversity ) :
+                            self.divmin_for_error_for_n_dcs[i][j][error] = log_diversity
+                            self.codons_for_error_for_n_dcs[i][j][error] = self.codon_inds_from_useful_codon_lex( i, jlex )
+                    jlex.upper_diagonal_increment();
+                self.errors_for_n_dcs_for_position[i][j].sort()
+
+        # self.divmin_for_error = [ [] ] * self.n_positions
+        # for i in xrange( self.n_positions ) : self.divmin_for_error[i] = [ ( self.infinity, 0 ) ] * self.max_per_position_error
+        # dims = [ 2**4 ] * 3 # i.e. [ 16 ] * 3
+        # self.dclex = LexicographicalIterator( dims )
+        # dc = DegenerateCodon()
+        # for i in xrange( self.n_positions ) :
+        #     self.dclex.reset()
+        #     while not self.dclex.at_end :
+        #         if dc.set_from_lex( self.dclex ) :
+        #             aas = self.aas_for_degenerate_codon( dc )
+        #             error = self.error_given_aas_for_pos( i, aas )
+        #             log_diversity = dc.log_diversity()
+        #             prev_diversity = self.divmin_for_error[ i ][ error ][0]
+        #             if prev_diversity == self.infinity or log_diversity < prev_diversity :
+        #                 # store the diversity and information on the degenerate codon that
+        #                 # produced this level of error
+        #                 self.divmin_for_error[i][ error ] = ( log_diversity, self.dclex.index() )
+        #         self.dclex.increment()
+
+
     def optimize_library( self, diversity_cap ) :
         '''
         Run a dynamic programming algorithm to determine the minimum diversity for
@@ -216,13 +464,13 @@ class AALibrary :
         #  pos0 = which error level ( from self.divmin_for_error ) for this position
         #  pos1 = which error total ( from self.dp_divmin_for_error ) for the previous position
         self.dp_traceback = [[]] * self.n_positions
-        self.error_span = self.max_obs * self.n_positions
+        self.error_span = self.max_per_position_error * self.n_positions
         for i in xrange( self.n_positions ) :
             self.dp_divmin_for_error[i] = [ self.infinity ] * self.error_span
             self.dp_traceback[i] = [ ( self.infinity, self.infinity ) ] * self.error_span
 
         # take care of position 0: copy self.divmin_for_error[0] into self.dp_divmin_for_eror
-        for i in xrange( self.max_obs ) :
+        for i in xrange( self.max_per_position_error ) :
             self.dp_divmin_for_error[0][i] = self.divmin_for_error[0][i][0]
             self.dp_traceback[0][i] = ( i, 0 ) # traceback doesn't proceed beyond position 0
 
@@ -231,7 +479,7 @@ class AALibrary :
             for j in xrange( self.error_span ) :
                 j_divmin = self.infinity
                 j_traceback = None
-                for k in xrange( min( j, self.max_obs ) ) :
+                for k in xrange( min( j, self.max_per_position_error ) ) :
                     if self.dp_divmin_for_error[i-1][j-k] == self.infinity : continue
                     if self.divmin_for_error[i][k][0] == self.infinity : continue
                     divsum = self.divmin_for_error[i][k][0] + self.dp_divmin_for_error[i-1][j-k]
@@ -287,7 +535,7 @@ def final_codon_string( position, degenerate_codon, library ) :
         idcpos = degenerate_codon.pos[i]
         base_tuple = ( idcpos[0], idcpos[1], idcpos[2], idcpos[3] )
         codon_string += degenerate_codon.degenerate_base_names[ base_tuple ]
-     
+
     present_string = ""
     for i in xrange(len(aas_present)) :
         if aas_present[i] :
@@ -300,7 +548,7 @@ def final_codon_string( position, degenerate_codon, library ) :
     log_diversity_string = "log(diversity)= %5.3f" % ( degenerate_codon.log_diversity() )
 
     return orig_pos_string + " : " + codon_string + " : " + log_diversity_string + " : " + present_string + " : " + absent_string
-    
+
 def print_output_codons( library, error_sequence ) :
     dc = DegenerateCodon()
     diversity_sum = 0
@@ -313,7 +561,7 @@ def print_output_codons( library, error_sequence ) :
     print "Max log diversity: ", math.log( diversity_cap ), "Theorical diversity", diversity_sum
 
 def practice_code( library ) :
-    print library.max_obs
+    print library.max_per_position_error
     print library.aa_counts
 
     dims = [ 2, 1, 1 ]
