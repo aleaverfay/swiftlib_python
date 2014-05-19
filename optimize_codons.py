@@ -62,7 +62,7 @@ class LexicographicalIterator :
                 for k in xrange(i+1,self.size) :
                     self.pos[ k ] = self.pos[ i ] + k - i
                     if self.pos[k] >= self.dimsizes[k] :
-                        beyond_end = true
+                        beyond_end = True
                         break
                 if beyond_end and i == 0 :
                     for k in xrange( self.size ) :
@@ -400,10 +400,13 @@ class AALibrary :
                 self.errors_for_n_dcs_for_position[i][j] = []
         aas_for_combo = 21 * [ False ]
         for i in xrange( self.n_positions ) :
-            for j in xrange(1,self.max_dcs_for_pos[i]) :
+            for j in xrange(1,self.max_dcs_for_pos[i]+1) :
                 dims = j*[ 0 ]
+                print "finding smallest diversity codons for errors", i, j, ":"
                 for k in xrange(j) :
                     dims[k] = len( self.useful_codons[i] )
+                    print dims[k],
+                print
                 jlex = LexicographicalIterator( dims )
                 jlex.upper_diagonal_reset()
 
