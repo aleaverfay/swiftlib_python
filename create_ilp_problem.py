@@ -40,6 +40,11 @@ class StretchNPrimersVar :
       self.nprimers = 0
       self.aux_vars = []
 
+class InequalityAuxVar :
+   def __init__( self ) :
+      self.name = ""
+      self.c0 = 0
+
 def define_variables_for_library( library ) :
    vars = {}
 
@@ -54,6 +59,7 @@ def define_variables_for_library( library ) :
          jvar.name = "NDCS_POS%d_IS_%d" % ( i, j )
          jvar.stretch = count_stretch
          jvar.n_dcs = j
+         jvar.pos = i
          posi_ndc_vars.append( jvar )
       ndcs_per_pos.append( posi_ndc_vars )
    vars[ "ndcs" ] = ndcs_per_pos
@@ -92,17 +98,23 @@ def define_variables_for_library( library ) :
          nprimers_var.name = varname
          nprimers_var.nprimers = size
 
-         gt_auxvars = [ "AND_GT_" + varname ]
+         gt_auxvar = InequalityAuxVar()
+         gt_auxvar.name = "AND_GT_" + varname
+         gt_auxvar.c0 = imembs - 1
+         gt_auxvars = [ gt_auxvar ]
          lt_auxvars = []
-         nprimers_var.aux_vars.append( gt_auxvars[0] )
+         nprimers_var.aux_vars.append( gt_auxvars[0].name )
          for j in xrange( imembs ) :
             jpos = stretch_members[i][j]
-            lt_auxvars.append( ( "AND_LT_%d_" % jpos ) + varname )
-            ndcs_per_pos[ jpos ][ lex.pos[j] ].aux_vars_part_of.append( gt_auxvars[0] )
-            ndcs_per_pos[ jpos ][ lex.pos[j] ].aux_vars_part_of.append( lt_auxvars[-1] )
-            nprimers_var.aux_vars.append( lt_auxvars[-1] )
+            lt_auxvar = InequalityAuxVar()
+            lt_auxvar.name = ( "AND_LT_%d_" % jpos ) + varname
+            lt_auxvar.c0 = 0
+            lt_auxvars.append( lt_auxvar )
+            ndcs_per_pos[ jpos ][ lex.pos[j] ].aux_vars_part_of.append( gt_auxvar.name )
+            ndcs_per_pos[ jpos ][ lex.pos[j] ].aux_vars_part_of.append( lt_auxvars[-1].name )
+            nprimers_var.aux_vars.append( lt_auxvars[-1].name )
         
-         all_gt_aux_vars.extend( gt_auxvars )
+         all_gt_aux_vars.append( gt_auxvar )
          all_lt_aux_vars.extend( lt_auxvars )
 
          curr_combos.append( nprimers_var )
@@ -132,15 +144,17 @@ def create_dcs_for_ilp_for_pos( library, pos, stretch ) :
             dc.stretch = stretch
             dc.position = pos
             dc.index = count
-            dc.index_by_ncds = count_by_ndcs
+            dc.index_by_ndcs = count_by_ndcs
             dc.n_dcs = i
             dc.log_div = posi_divmin[ j ]
             dc.error = j
             dclist.append( dc )
+      #print "Appending to ncodons_by_ncd: ", count_by_ndcs, " ncodons_by_ndc: ", ncodons_by_ndc
       ncodons_by_ndc.append( count_by_ndcs )
    # for dc in dclist :
    #    print dc
    # print
+   # print "Ncodons by ndc: ", ncodons_by_ndc
    return dclist, ncodons_by_ndc
 
 
@@ -153,7 +167,8 @@ def dc_column( dc ) :
    return [ line1, line2, line3, line4, line5 ]
 
 def ndc_count_var_column( ndc_var, ndcs  ) :
-   lines = [ " " + ndc_var.name + ( " ndc_%d_%d_or_everything" % ( ndc_var.pos, ndc_var.n_dcs ) ) + ( "%d\n" % -1*ndcs ) ]
+   #print "ndc_count_var_column", ndc_var.name, " ", ndcs, ( "%d\n" % (-1*ndcs) )
+   lines = [ " " + ndc_var.name + ( " ndc_%d_%d_or_everything -1\n" % ( ndc_var.pos, ndc_var.n_dcs ) ) ]
    for i in xrange(1,ndcs+1) :
       lines.append( " " + ndc_var.name + ( " ndc_%d_%d_or_%d" % ( ndc_var.pos, ndc_var.n_dcs, i ) ) + " -1\n" )
    # these aux vars represent the boolean AND logic when trying to compute
@@ -216,6 +231,8 @@ if __name__ == "__main__" :
       dcs.append( idcs )
       ncodons_by_ndcs.append( ncodons_by_ndc )
 
+   #print "NCODONS_BY_NDCS: ", ncodons_by_ndcs
+
    vars = define_variables_for_library( library )
 
    print "beginning to write ILP problem"
@@ -226,18 +243,18 @@ if __name__ == "__main__" :
    fmps_lines.append( " L libsize\n" )
    fmps_lines.append( " L total_num_primers\n" )
    for aux in vars[ "gt_aux_vars" ] :
-      fmps_lines.append( " E " + aux + "\n" )
+      fmps_lines.append( " L " + aux.name + "\n" )
    for aux in vars[ "lt_aux_vars" ] :
-      fmps_lines.append( " E " + aux + "\n" )
+      fmps_lines.append( " G " + aux.name + "\n" )
    for i in xrange( library.n_positions ) :
       fmps_lines.append( " E onlyone_" + str(i) + "\n" )
    for i in xrange( library.n_positions ) :
       for j in xrange( 1, library.max_dcs_for_pos[i] + 1 ) :
-         fmps_lines.append( " E ndc_" + str(i) + "_" + str(j) + "_or_everything\n" )
+         fmps_lines.append( " G ndc_" + str(i) + "_" + str(j) + "_or_everything\n" )
    for i in xrange( library.n_positions ) :
       for j in xrange( 1, library.max_dcs_for_pos[i] + 1 ) :
          for k in xrange( 1, ncodons_by_ndcs[ i ][ j-1 ] + 1 ) :
-            fmps_lines.append( " E ndc_%d_%d_or_%d\n" % ( i, j, k ))
+            fmps_lines.append( " L ndc_%d_%d_or_%d\n" % ( i, j, k ))
 
 
    fmps_lines.append( "COLUMNS\n" )
@@ -248,12 +265,42 @@ if __name__ == "__main__" :
    ndc_vars = vars[ "ndcs" ]
    for i in xrange( library.n_positions ) :
       for j in xrange( library.max_dcs_for_pos[ i ] ) :
+         #print "WHAT?!", ncodons_by_ndcs, ncodons_by_ndcs[i], ncodons_by_ndcs[i][j]
          fmps_lines.extend( ndc_count_var_column( ndc_vars[i][j], ncodons_by_ndcs[i][j] ))
 
    stretch_combos = vars[ "stretch_combos" ]
    for sclist in stretch_combos :
       for sc in sclist :
          fmps_lines.extend( stretch_n_primers_column( sc ) )
+
+   fmps_lines.append( "RHS\n" )
+   fmps_lines.append( " RHS1 libsize " + ( "%6f\n" % math.log( diversity_cap )))
+   fmps_lines.append( " RHS1 total_num_primers " + str(nprimer_limit) + "\n" )
+   for i in xrange( library.n_positions ) :
+      fmps_lines.append( " RHS1 onlyone_%d 1\n" % i )
+   for aux in vars[ "gt_aux_vars" ] :
+      fmps_lines.append( " RHS1 " + aux.name + " " + str( aux.c0 ) + "\n" )
+   for aux in vars[ "lt_aux_vars" ] :
+      fmps_lines.append( " RHS1 " + aux.name + " " + str( aux.c0 ) + "\n" )
+   for i in xrange( library.n_positions ) :
+      for j in xrange( 1, library.max_dcs_for_pos[i] + 1 ) :
+         fmps_lines.append( " RHS1 ndc_" + str(i) + "_" + str(j) + "_or_everything 0\n" )
+   for i in xrange( library.n_positions ) :
+      for j in xrange( 1, library.max_dcs_for_pos[i] + 1 ) :
+         for k in xrange( 1, ncodons_by_ndcs[ i ][ j-1 ] + 1 ) :
+            fmps_lines.append( " RHS1 ndc_%d_%d_or_%d 0 \n" % ( i, j, k ))
+
+   fmps_lines.append( "BOUNDS\n" )
+   for i in xrange( library.n_positions ) :
+      for dc in dcs[i] :
+         fmps_lines.append( " BV BV1 " + dc.name + "\n" )
+   for i in xrange( library.n_positions ) :
+      for ndc_var in ndc_vars[ i ] :
+         fmps_lines.append( " BV BV1 " + ndc_var.name + "\n" )
+   for sclist in stretch_combos :
+      for sc in sclist :
+         fmps_lines.append( " BV BV1 " + sc.name + "\n" )
+   fmps_lines.append( "ENDATA\n" )
 
    # #fmps_lines.append( " MARK000 'MARKER' 'INTORG'\n" )
    # 

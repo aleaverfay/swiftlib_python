@@ -291,15 +291,16 @@ class AALibrary :
             self.max_oligos_total = self.n_stretches + self.max_oligos_per_stretch - 1
 
         self.max_per_position_error = 0
+        obs = [ 0 ] * self.n_positions
         for i in xrange(20) :
             line = lines[ i + 3 ]
             vals = line.split(",")[1:]
-            iiobs = 0
             for j in xrange(len(vals)):
                 self.aa_counts[j][i] = int(vals[j])
-                iiobs += self.aa_counts[j][i]
-            if iiobs > self.max_per_position_error :
-                self.max_per_position_error = iiobs
+                obs[ j ] += self.aa_counts[j][i]
+        for i in xrange( self.n_positions ) :
+            if obs[i] > self.max_per_position_error :
+                self.max_per_position_error = obs[i]
     def error_given_aas_for_pos( self, pos, aas ) :
         error = 0
         for i in xrange(20) :
@@ -422,6 +423,8 @@ class AALibrary :
                     log_diversity = math.log( diversity )
                     error = self.error_given_aas_for_pos( i, aas_for_combo )
                     if ( error != self.infinity ) :
+                        #print i, j, error, self.max_per_position_error
+                        sys.stdout.flush()
                         prev_diversity = self.divmin_for_error_for_n_dcs[i][j][error]
                         if ( prev_diversity == self.infinity ) :
                             self.errors_for_n_dcs_for_position[i][j].append( error )
