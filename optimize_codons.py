@@ -1,3 +1,25 @@
+# The MIT License (MIT)
+#
+# Copyright (c) 2014 Andrew Leaver-Fay, Tim Jacobs, Hayretin Yumerefendi, Brian Kuhlman.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+#     in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 import blargs
 import genetic_code
 import amino_acids as aa
@@ -227,7 +249,7 @@ class AALibrary :
     # row1/column1 gives nothing
     # all other row/column combinations should be integers
     def load_library( self, libname ) :
-        lines = open( libname ).readlines()
+        lines = [x.strip() for x in open( libname ).readlines() ]
         assert( len(lines) == 23 )
         row1 = lines[0].split(",")
         self.n_positions = len(row1)-1
@@ -296,7 +318,12 @@ class AALibrary :
             line = lines[ i + 3 ]
             vals = line.split(",")[1:]
             for j in xrange(len(vals)):
-                self.aa_counts[j][i] = int(vals[j])
+                if vals[j] == "!" :
+                    self.forbidden[j][i] = True
+                elif vals[j] == "*" :
+                    self.required[j][i] = True
+                else :
+                    self.aa_counts[j][i] = int(vals[j])
                 obs[ j ] += self.aa_counts[j][i]
         for i in xrange( self.n_positions ) :
             if obs[i] > self.max_per_position_error :

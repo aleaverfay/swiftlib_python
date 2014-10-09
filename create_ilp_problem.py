@@ -1,3 +1,25 @@
+# The MIT License (MIT)
+#
+# Copyright (c) 2014 Andrew Leaver-Fay, Tim Jacobs, Hayretin Yumerefendi, Brian Kuhlman.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+#     in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
 import blargs
 import math
 import optimize_codons
@@ -13,6 +35,8 @@ class DegenerateCodonForILP :
       self.name = ""
       self.log_div = 0
       self.error = 0
+      self.codons = ""
+      self.aas = ""
 
    def __str__( self ) :
       s = "DC: " + self.name + " on " + str(self.position) + " of stretch: " + str(self.stretch) \
@@ -128,6 +152,7 @@ def define_variables_for_library( library ) :
       
 
 def create_dcs_for_ilp_for_pos( library, pos, stretch ) :
+   degcodon = optimize_codons.DegenerateCodon()
    dclist = []
    ncodons_by_ndc = []
    count = 0
@@ -149,6 +174,22 @@ def create_dcs_for_ilp_for_pos( library, pos, stretch ) :
             dc.log_div = posi_divmin[ j ]
             dc.error = j
             dclist.append( dc )
+            codon_inds = library.codons_for_error_for_n_dcs[ pos ][ i ][ j ]
+            jcodons = []
+            aas_present = 21 * [ False ]
+            for k in codon_inds :
+               library.dclex.set_from_index( k )
+               degcodon.set_from_lex( library.dclex )
+               jcodons.append( degcodon.codon_string() )
+               kaas = library.aas_for_dc[ k ]
+               for l in xrange(21) :
+                  aas_present[ l ] |= kaas[ l ]
+            dc.codons = "+".join( jcodons )
+            present_aas = []
+            for k in xrange(21) :
+               if aas_present[k] :
+                  present_aas.append( optimize_codons.aastr_for_integer( k ))
+            dc.aas = "".join( present_aas )
       #print "Appending to ncodons_by_ncd: ", count_by_ndcs, " ncodons_by_ndc: ", ncodons_by_ndc
       ncodons_by_ndc.append( count_by_ndcs )
    # for dc in dclist :
@@ -213,6 +254,7 @@ if __name__ == "__main__" :
        p.str( "input_csv" ).required()
        p.float( "diversity_cap" ).required()
        p.int( "nprimer_limit" ).default(-1)
+       p.str( "ilp_input_prefix" ).required()
 
    print "Loading library"
    library = optimize_codons.AALibrary()
@@ -335,5 +377,9 @@ if __name__ == "__main__" :
    #       varlines.append( var[0] + " " + var[1] + "\n")
    # fmps_lines.append( "ENDATA\n" )
    # 
-   open( "test.fmps", "w" ).writelines( fmps_lines )
-   # open( "test.vars", "w" ).writelines( varlines )
+   open( ilp_input_prefix + ".fmps", "w" ).writelines( fmps_lines )
+   varlines = []
+   for i in xrange( library.n_positions ) :
+      for dc in dcs[ i ] :
+         varlines.append( dc.name + " " + dc.codons + " " + dc.aas + "\n" )
+   open( ilp_input_prefix + ".dcs", "w" ).writelines( varlines )
