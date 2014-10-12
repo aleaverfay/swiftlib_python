@@ -150,6 +150,7 @@ class DegenerateCodon :
             (True, True, True, False) : "V",
             (True, True, True, True ) : "N" }
         self.names_to_bases = {}
+        self.infinity = -1
         for bases in self.degenerate_base_names :
             self.names_to_bases[ self.degenerate_base_names[ bases] ] = bases;
 
@@ -174,7 +175,7 @@ class DegenerateCodon :
     def diversity( self ) :
         for i in xrange(3) :
             if self.count_pos[i] == 0 :
-                return this.infinity
+                return self.infinity
         div =  1
         for i in xrange(3) :
             div *= self.count_pos[i]
@@ -209,7 +210,7 @@ class DegenerateCodon :
 
 class AALibrary :
     def __init__( self ) :
-        self.infinity = -1.0;
+        self.infinity = -1;
         self.gcmapper = GeneticCodeMapper()
         self.max_dcs_per_pos = 1
         self.max_oligos_per_stretch = 0
@@ -250,7 +251,7 @@ class AALibrary :
     # all other row/column combinations should be integers
     def load_library( self, libname ) :
         lines = [x.strip() for x in open( libname ).readlines() ]
-        assert( len(lines) == 23 )
+        assert( len(lines) == 24 )
         row1 = lines[0].split(",")
         self.n_positions = len(row1)-1
         self.aa_counts = [ [] ] * self.n_positions
@@ -314,7 +315,7 @@ class AALibrary :
 
         self.max_per_position_error = 0
         obs = [ 0 ] * self.n_positions
-        for i in xrange(20) :
+        for i in xrange(21) :
             line = lines[ i + 3 ]
             vals = line.split(",")[1:]
             for j in xrange(len(vals)):
@@ -330,7 +331,7 @@ class AALibrary :
                 self.max_per_position_error = obs[i]
     def error_given_aas_for_pos( self, pos, aas ) :
         error = 0
-        for i in xrange(20) :
+        for i in xrange(21) :
             icount = self.aa_counts[ pos ][ i ]
             if not aas[ i ] :
                 if self.required[ pos ][ i ] :
@@ -346,7 +347,7 @@ class AALibrary :
 
     def error_given_aas_for_pos_ignore_req( self, pos, aas ) :
         error = 0
-        for i in xrange(20) :
+        for i in xrange(21) :
             icount = self.aa_counts[ pos ][ i ]
             if not aas[ i ] :
                 if icount > 0 :
@@ -374,15 +375,23 @@ class AALibrary :
         # index 2: either 0 (for the codon's diveristy) or 1 (for the codon's index)
 
         div_for_codons = []
+        temp_lex = LexicographicalIterator( [ 15, 15, 15 ] )
+        temp_dc = DegenerateCodon()
         for i in xrange( self.n_positions ) :
             self.useful_codons.append( [] )
             div_for_codons.append( {} )
         for i in xrange( 3375 ) :
             iaas = self.aas_for_dc[ i ]
             idiv = self.diversities_for_dc[ i ]
+            # TEMP!
+            temp_lex.set_from_index( i );
+            temp_dc.set_from_lex( temp_lex );
             for j in xrange( self.n_positions ) :
                 ijerror = self.error_given_aas_for_pos_ignore_req( j, iaas )
+
+                print "error for codon: ", temp_dc.codon_string(), "position", j, "error:", ijerror
                 if ( ijerror == self.infinity ) : continue;
+
                 ij_aaind = self.useful_aaind_for_pos( iaas, j )
 
                 # keep this codon if it's the first codon producing ijerror
